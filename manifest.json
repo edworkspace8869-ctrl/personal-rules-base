@@ -2,7 +2,7 @@
   "name": "Personal Rules",
   "short_name": "Rules",
   "description": "Track and manage your personal governance system",
-  "start_url": "/",
+  "start_url": "/personal-rules-base/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#111111",
