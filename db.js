@@ -6,7 +6,7 @@
 class RulesDatabase {
     constructor() {
         this.dbName = 'PersonalRulesDB';
-        this.version = 2; // Increment version for schema change
+        this.version = 1;
         this.db = null;
     }
 
@@ -48,16 +48,6 @@ class RulesDatabase {
                     rulesStore.createIndex('baseRuleId', 'baseRuleId', { unique: false });
                     
                     console.log('Rules object store created with indexes');
-                }
-
-                // Create object store for systems
-                if (!this.db.objectStoreNames.contains('systems')) {
-                    const systemsStore = this.db.createObjectStore('systems', { keyPath: 'name' });
-                    
-                    // Create indexes
-                    systemsStore.createIndex('createdAt', 'createdAt', { unique: false });
-                    
-                    console.log('Systems object store created with indexes');
                 }
             };
         });
@@ -434,122 +424,6 @@ class RulesDatabase {
                    rule.system.toLowerCase().includes(searchLower) ||
                    rule.clauseText.toLowerCase().includes(searchLower) ||
                    (rule.body && rule.body.toLowerCase().includes(searchLower));
-        });
-    }
-
-    // ============================================
-    // SYSTEMS MANAGEMENT
-    // ============================================
-
-    /**
-     * Create a new system
-     * @param {Object} system - The system object to create
-     * @returns {Promise<Object>} The created system
-     */
-    async createSystem(system) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['systems'], 'readwrite');
-            const store = transaction.objectStore('systems');
-            const request = store.add(system);
-
-            request.onsuccess = () => {
-                console.log('System created:', system.name);
-                resolve(system);
-            };
-
-            request.onerror = () => {
-                console.error('Failed to create system:', request.error);
-                reject(request.error);
-            };
-        });
-    }
-
-    /**
-     * Get a system by name
-     * @param {string} systemName - The name of the system to retrieve
-     * @returns {Promise<Object|null>} The system object or null if not found
-     */
-    async getSystem(systemName) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['systems'], 'readonly');
-            const store = transaction.objectStore('systems');
-            const request = store.get(systemName);
-
-            request.onsuccess = () => {
-                resolve(request.result || null);
-            };
-
-            request.onerror = () => {
-                console.error('Failed to get system:', request.error);
-                reject(request.error);
-            };
-        });
-    }
-
-    /**
-     * Get all systems
-     * @returns {Promise<Array>} Array of all systems
-     */
-    async getAllSystems() {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['systems'], 'readonly');
-            const store = transaction.objectStore('systems');
-            const request = store.getAll();
-
-            request.onsuccess = () => {
-                resolve(request.result || []);
-            };
-
-            request.onerror = () => {
-                console.error('Failed to get all systems:', request.error);
-                reject(request.error);
-            };
-        });
-    }
-
-    /**
-     * Update an existing system
-     * @param {Object} system - The system object with updated data
-     * @returns {Promise<Object>} The updated system
-     */
-    async updateSystem(system) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['systems'], 'readwrite');
-            const store = transaction.objectStore('systems');
-            const request = store.put(system);
-
-            request.onsuccess = () => {
-                console.log('System updated:', system.name);
-                resolve(system);
-            };
-
-            request.onerror = () => {
-                console.error('Failed to update system:', request.error);
-                reject(request.error);
-            };
-        });
-    }
-
-    /**
-     * Delete a system
-     * @param {string} systemName - The name of the system to delete
-     * @returns {Promise<boolean>} True if deleted successfully
-     */
-    async deleteSystem(systemName) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['systems'], 'readwrite');
-            const store = transaction.objectStore('systems');
-            const request = store.delete(systemName);
-
-            request.onsuccess = () => {
-                console.log('System deleted:', systemName);
-                resolve(true);
-            };
-
-            request.onerror = () => {
-                console.error('Failed to delete system:', request.error);
-                reject(request.error);
-            };
         });
     }
 

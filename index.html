@@ -6,16 +6,16 @@
     <meta name="description" content="Personal Rules - Track and manage your personal governance system">
     <meta name="theme-color" content="#111111">
     
-    <title>Personal Rules</title>
+    <title>Personal Rules Database</title>
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="/personal-rules-base/manifest.json">
     
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="icon-192.png">
+    <link rel="icon" type="image/png" href="emblem.png">
     
     <!-- Apple Touch Icon -->
-    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="emblem.png">
     
     <style>
         * {
@@ -46,11 +46,11 @@
         }
 
         .emblem {
-            width: 32px;
-            height: 32px;
+            width: 128px;
+            height: 128px;
             border-radius: 6px;
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: #111111;
+            border: 0px solid #333;
             flex-shrink: 0;
             display: flex;
             align-items: center;
@@ -71,7 +71,7 @@
         }
 
         h1 {
-            font-size: 20px;
+            font-size: 30px;
             font-weight: 600;
             color: #fff;
         }
@@ -526,18 +526,15 @@
 <body>
     <header>
         <div class="emblem">
-            <!-- Emblem image will go here if uploaded -->
-            <!-- Uncomment and add your emblem.png to use -->
-            <!-- <img src="emblem.png" alt="Personal Emblem"> -->
+            <img src="emblem.svg" alt="Personal Emblem">
         </div>
-        <h1>Personal Rules</h1>
+        <h1>Personal Rules Database</h1>
     </header>
 
     <nav class="nav-tabs">
         <button class="nav-tab active" data-view="dashboard">Dashboard</button>
         <button class="nav-tab" data-view="active">Active</button>
         <button class="nav-tab" data-view="proposed">Proposed</button>
-        <button class="nav-tab" data-view="systems">Systems</button>
         <button class="nav-tab" data-view="create">New Rule</button>
         <button class="nav-tab" data-view="archives">Archives</button>
     </nav>
