@@ -5,11 +5,11 @@
 
 const CACHE_NAME = 'personal-rules-v1';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/db.js',
-  '/manifest.json'
+  '/personal-rules-base/',
+  '/personal-rules-base/index.html',
+  '/personal-rules-base/app.js',
+  '/personal-rules-base/db.js',
+  '/personal-rules-base/manifest.json'
 ];
 
 // Install event - cache resources
