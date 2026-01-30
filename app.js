@@ -8,6 +8,7 @@ class PersonalRulesApp {
         this.db = null;
         this.currentView = 'dashboard';
         this.rules = [];
+        this.systems = [];
         this.editingRule = null;
     }
 
@@ -44,6 +45,7 @@ class PersonalRulesApp {
      */
     async loadRules() {
         this.rules = await this.db.getAllRules();
+        this.systems = await this.db.getAllSystems();
     }
 
     /**
@@ -97,6 +99,10 @@ class PersonalRulesApp {
             case 'proposed':
                 container.innerHTML = this.renderProposedRules();
                 this.attachProposedListeners();
+                break;
+            case 'systems':
+                container.innerHTML = this.renderSystems();
+                this.attachSystemsListeners();
                 break;
             case 'create':
                 container.innerHTML = this.renderCreateForm();
@@ -311,6 +317,186 @@ class PersonalRulesApp {
     }
 
     /**
+     * Render systems management view
+     */
+    renderSystems() {
+        return `
+            <div class="section">
+                <button class="btn btn-primary" data-action="create-system">+ Create New System</button>
+            </div>
+
+            ${this.systems.length > 0 ? `
+                <div class="section">
+                    <div class="section-title">Existing Systems</div>
+                    ${this.systems.map(system => {
+                        const systemRules = this.rules.filter(r => r.system === system.name && !r.isArchived);
+                        return `
+                            <div class="rule-card" data-action="edit-system" data-system="${system.name}">
+                                <div class="rule-title">${system.name}</div>
+                                <div class="rule-meta"><strong>Rules:</strong> ${systemRules.length}</div>
+                                ${system.successMetrics ? `
+                                    <div class="rule-meta"><strong>Success Metrics:</strong> ${system.successMetrics.substring(0, 100)}${system.successMetrics.length > 100 ? '...' : ''}</div>
+                                ` : '<div class="rule-meta" style="color: #666;">No success metrics defined</div>'}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : '<div class="empty-state"><div class="empty-state-icon">📁</div><p class="empty-state-text">No systems created yet. Create your first system to organize your rules!</p></div>'}
+        `;
+    }
+
+    /**
+     * Attach systems view listeners
+     */
+    attachSystemsListeners() {
+        // Create system button
+        const createBtn = document.querySelector('[data-action="create-system"]');
+        if (createBtn) {
+            createBtn.addEventListener('click', () => this.showSystemDialog());
+        }
+
+        // Edit system cards
+        document.querySelectorAll('[data-action="edit-system"]').forEach(card => {
+            card.addEventListener('click', (e) => {
+                const systemName = e.currentTarget.dataset.system;
+                this.showSystemDialog(systemName);
+            });
+        });
+    }
+
+    /**
+     * Show system create/edit dialog
+     */
+    async showSystemDialog(systemName = null) {
+        const isEdit = !!systemName;
+        const system = isEdit ? await this.db.getSystem(systemName) : null;
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h3>${isEdit ? 'Edit' : 'Create'} System</h3>
+                <form id="systemForm">
+                    <div class="form-group">
+                        <label class="form-label">System Name *</label>
+                        <input type="text" class="form-input" id="systemName" value="${system?.name || ''}" placeholder="e.g., Sunday Routine" ${isEdit ? 'readonly' : ''} required>
+                        ${isEdit ? '<div class="form-help">System name cannot be changed</div>' : ''}
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Success Metrics</label>
+                        <textarea class="form-textarea" id="systemSuccessMetrics" placeholder="How will you measure success for rules in this system?">${system?.successMetrics || ''}</textarea>
+                        <div class="form-help">Rules can inherit these metrics or define their own</div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-primary">${isEdit ? 'Update' : 'Create'} System</button>
+                        <button type="button" class="btn btn-secondary" id="cancelSystem">Cancel</button>
+                        ${isEdit ? '<button type="button" class="btn btn-danger" id="deleteSystem">Delete System</button>' : ''}
+                    </div>
+                </form>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Handle form submission
+        document.getElementById('systemForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('systemName').value.trim();
+            const successMetrics = document.getElementById('systemSuccessMetrics').value.trim();
+
+            if (!name) {
+                alert('Please enter a system name');
+                return;
+            }
+
+            const systemData = {
+                name,
+                successMetrics: successMetrics || null,
+                createdAt: system?.createdAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            try {
+                if (isEdit) {
+                    await this.db.updateSystem(systemData);
+                    this.showSuccess(`System "${name}" updated successfully!`);
+                } else {
+                    await this.db.createSystem(systemData);
+                    this.showSuccess(`System "${name}" created successfully!`);
+                }
+                await this.loadRules();
+                document.body.removeChild(modal);
+                this.renderView('systems');
+            } catch (error) {
+                console.error('Failed to save system:', error);
+                this.showError('Failed to save system. Please try again.');
+            }
+        });
+
+        // Handle cancel
+        document.getElementById('cancelSystem').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+
+        // Handle delete
+        if (isEdit) {
+            document.getElementById('deleteSystem').addEventListener('click', async () => {
+                const systemRules = this.rules.filter(r => r.system === systemName);
+                if (systemRules.length > 0) {
+                    alert(`Cannot delete system "${systemName}" because it has ${systemRules.length} associated rules. Delete or move those rules first.`);
+                    return;
+                }
+
+                if (confirm(`Are you sure you want to delete the system "${systemName}"?`)) {
+                    try {
+                        await this.db.deleteSystem(systemName);
+                        await this.loadRules();
+                        this.showSuccess(`System "${systemName}" deleted successfully!`);
+                        document.body.removeChild(modal);
+                        this.renderView('systems');
+                    } catch (error) {
+                        console.error('Failed to delete system:', error);
+                        this.showError('Failed to delete system. Please try again.');
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Attach proposed rules listeners
+     */
+    attachProposedListeners() {
+        // Pass buttons
+        document.querySelectorAll('[data-action="pass"]').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const ruleId = e.target.dataset.id;
+                await this.showPassDialog(ruleId);
+            });
+        });
+
+        // Reject buttons
+        document.querySelectorAll('[data-action="reject"]').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const ruleId = e.target.dataset.id;
+                if (confirm('Are you sure you want to reject this rule?')) {
+                    await this.rejectRule(ruleId);
+                }
+            });
+        });
+
+        // View detail buttons
+        document.querySelectorAll('[data-action="view-detail"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const ruleId = e.target.dataset.id;
+                this.showRuleDetail(ruleId);
+            });
+        });
+    }
+
+    /**
      * Show pass dialog for setting effective date
      */
     async showPassDialog(ruleId) {
@@ -451,9 +637,15 @@ class PersonalRulesApp {
             system: '',
             clauseType: 'purpose',
             clauseText: '',
+            successMetricsType: 'none',
             successMetrics: '',
             body: ''
         };
+
+        // Get existing system names for dropdown
+        const existingSystems = [...new Set(this.rules.map(r => r.system))];
+        const definedSystems = this.systems.map(s => s.name);
+        const allSystems = [...new Set([...definedSystems, ...existingSystems])].sort();
 
         return `
             <form id="ruleForm">
@@ -464,7 +656,16 @@ class PersonalRulesApp {
 
                 <div class="form-group">
                     <label class="form-label">System *</label>
-                    <input type="text" class="form-input" id="system" value="${formData.system}" placeholder="e.g., Sunday Routine" required>
+                    ${allSystems.length > 0 ? `
+                        <select class="form-select" id="systemSelect">
+                            <option value="">-- Select Existing or Type New --</option>
+                            ${allSystems.map(sys => `<option value="${sys}" ${formData.system === sys ? 'selected' : ''}>${sys}</option>`).join('')}
+                            <option value="__new__">+ Create New System</option>
+                        </select>
+                        <input type="text" class="form-input" id="systemInput" placeholder="Enter new system name" style="display: none; margin-top: 8px;">
+                    ` : `
+                        <input type="text" class="form-input" id="systemInput" value="${formData.system}" placeholder="e.g., Sunday Routine" required>
+                    `}
                     <div class="form-help">Category or routine this rule belongs to</div>
                 </div>
 
@@ -487,10 +688,32 @@ class PersonalRulesApp {
                     <textarea class="form-textarea" id="clauseText" placeholder="Explain why this rule exists..." required>${formData.clauseText}</textarea>
                 </div>
 
-                <div class="form-group" id="successMetricsGroup" style="${formData.clauseType === 'hypothesis' ? '' : 'display: none;'}">
+                <div class="form-group">
                     <label class="form-label">Success Metrics</label>
-                    <textarea class="form-textarea" id="successMetrics" placeholder="How will you measure if this experimental rule works?">${formData.successMetrics || ''}</textarea>
-                    <div class="form-help">Required for experimental rules</div>
+                    <div class="form-radio">
+                        <label>
+                            <input type="radio" name="successMetricsType" value="none" ${!formData.successMetrics || formData.successMetricsType === 'none' ? 'checked' : ''}>
+                            None
+                        </label>
+                        <label>
+                            <input type="radio" name="successMetricsType" value="system" ${formData.successMetricsType === 'system' ? 'checked' : ''}>
+                            Follow System
+                        </label>
+                        <label>
+                            <input type="radio" name="successMetricsType" value="custom" ${formData.successMetricsType === 'custom' ? 'checked' : ''}>
+                            Custom
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group" id="customMetricsGroup" style="${formData.successMetricsType === 'custom' ? '' : 'display: none;'}">
+                    <label class="form-label">Custom Success Metrics</label>
+                    <textarea class="form-textarea" id="successMetrics" placeholder="How will you measure if this rule works?">${formData.successMetricsType === 'custom' ? formData.successMetrics : ''}</textarea>
+                </div>
+
+                <div id="systemMetricsPreview" style="display: none; margin-bottom: 20px;">
+                    <div class="detail-label">System Success Metrics (Preview)</div>
+                    <div class="detail-clause" id="systemMetricsText"></div>
                 </div>
 
                 <div class="form-group">
@@ -510,12 +733,51 @@ class PersonalRulesApp {
     attachCreateFormListeners() {
         const form = document.getElementById('ruleForm');
         
-        // Show/hide success metrics based on clause type
-        const clauseTypeRadios = form.querySelectorAll('input[name="clauseType"]');
-        clauseTypeRadios.forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const metricsGroup = document.getElementById('successMetricsGroup');
-                metricsGroup.style.display = e.target.value === 'hypothesis' ? 'block' : 'none';
+        // System selector logic
+        const systemSelect = document.getElementById('systemSelect');
+        const systemInput = document.getElementById('systemInput');
+        if (systemSelect) {
+            systemSelect.addEventListener('change', async (e) => {
+                if (e.target.value === '__new__') {
+                    systemInput.style.display = 'block';
+                    systemInput.required = true;
+                    systemSelect.required = false;
+                    systemInput.focus();
+                } else {
+                    systemInput.style.display = 'none';
+                    systemInput.required = false;
+                    systemSelect.required = true;
+                    // Update success metrics preview
+                    await this.updateSystemMetricsPreview(e.target.value);
+                }
+            });
+
+            // Initial preview if system is selected
+            if (systemSelect.value && systemSelect.value !== '__new__') {
+                this.updateSystemMetricsPreview(systemSelect.value);
+            }
+        }
+
+        // Success metrics type change
+        const metricsTypeRadios = form.querySelectorAll('input[name="successMetricsType"]');
+        metricsTypeRadios.forEach(radio => {
+            radio.addEventListener('change', async (e) => {
+                const customGroup = document.getElementById('customMetricsGroup');
+                const systemPreview = document.getElementById('systemMetricsPreview');
+                
+                if (e.target.value === 'custom') {
+                    customGroup.style.display = 'block';
+                    systemPreview.style.display = 'none';
+                } else if (e.target.value === 'system') {
+                    customGroup.style.display = 'none';
+                    systemPreview.style.display = 'block';
+                    // Update preview
+                    const selectedSystem = systemSelect ? systemSelect.value : systemInput.value;
+                    await this.updateSystemMetricsPreview(selectedSystem);
+                } else {
+                    customGroup.style.display = 'none';
+                    systemPreview.style.display = 'none';
+                }
             });
         });
 
@@ -527,15 +789,50 @@ class PersonalRulesApp {
     }
 
     /**
+     * Update system metrics preview
+     */
+    async updateSystemMetricsPreview(systemName) {
+        const systemPreview = document.getElementById('systemMetricsPreview');
+        const systemMetricsText = document.getElementById('systemMetricsText');
+        
+        if (!systemName || systemName === '__new__') {
+            systemPreview.style.display = 'none';
+            return;
+        }
+
+        const system = await this.db.getSystem(systemName);
+        const metricsType = document.querySelector('input[name="successMetricsType"]:checked')?.value;
+        
+        if (metricsType === 'system') {
+            if (system && system.successMetrics) {
+                systemMetricsText.textContent = system.successMetrics;
+                systemPreview.style.display = 'block';
+            } else {
+                systemMetricsText.textContent = 'This system has no success metrics defined yet.';
+                systemPreview.style.display = 'block';
+            }
+        }
+    }
+
+    /**
      * Create a new rule
      */
     async createRule() {
         try {
             const title = document.getElementById('title').value.trim();
-            const system = document.getElementById('system').value.trim();
+            const systemSelect = document.getElementById('systemSelect');
+            const systemInput = document.getElementById('systemInput');
+            
+            let system;
+            if (systemSelect && systemSelect.value && systemSelect.value !== '__new__') {
+                system = systemSelect.value;
+            } else {
+                system = systemInput.value.trim();
+            }
+
             const clauseType = document.querySelector('input[name="clauseType"]:checked').value;
             const clauseText = document.getElementById('clauseText').value.trim();
-            const successMetrics = document.getElementById('successMetrics').value.trim();
+            const successMetricsType = document.querySelector('input[name="successMetricsType"]:checked').value;
             const body = document.getElementById('body').value.trim();
 
             // Validation
@@ -544,9 +841,26 @@ class PersonalRulesApp {
                 return;
             }
 
-            if (clauseType === 'hypothesis' && !successMetrics) {
-                this.showError('Success metrics are required for experimental rules.');
-                return;
+            // Handle success metrics based on type
+            let successMetrics = null;
+            let successMetricsSource = 'none';
+
+            if (successMetricsType === 'custom') {
+                successMetrics = document.getElementById('successMetrics').value.trim();
+                if (!successMetrics) {
+                    this.showError('Please enter custom success metrics or select a different option.');
+                    return;
+                }
+                successMetricsSource = 'custom';
+            } else if (successMetricsType === 'system') {
+                const systemData = await this.db.getSystem(system);
+                if (systemData && systemData.successMetrics) {
+                    successMetrics = systemData.successMetrics;
+                    successMetricsSource = 'system';
+                } else {
+                    this.showError(`The system "${system}" has no success metrics defined. Please add metrics to the system or choose custom metrics.`);
+                    return;
+                }
             }
 
             // Generate rule ID
@@ -569,7 +883,8 @@ class PersonalRulesApp {
                 expirationDate: null,
                 clauseType,
                 clauseText,
-                successMetrics: clauseType === 'hypothesis' ? successMetrics : null,
+                successMetrics,
+                successMetricsSource, // 'none', 'system', or 'custom'
                 body,
                 isArchived: false,
                 baseRuleId: null,
@@ -748,7 +1063,7 @@ class PersonalRulesApp {
 
             ${rule.successMetrics ? `
                 <div class="detail-section">
-                    <div class="detail-label">Success Metrics</div>
+                    <div class="detail-label">Success Metrics ${rule.successMetricsSource === 'system' ? '(From System)' : rule.successMetricsSource === 'custom' ? '(Custom)' : ''}</div>
                     <div class="detail-clause">${rule.successMetrics}</div>
                 </div>
             ` : ''}
