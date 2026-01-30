@@ -152,6 +152,12 @@ class PersonalRulesApp {
                     : ''}
             </div>
 
+            <div class="section">
+                <div class="section-title">Data Management</div>
+                <button class="btn btn-secondary" data-action="export">📥 Export Backup</button>
+                <button class="btn btn-secondary" data-action="import">📤 Import Backup</button>
+            </div>
+
             ${systems.length > 0 ? `
                 <div class="section">
                     <div class="section-title">Active Systems</div>
@@ -192,6 +198,18 @@ class PersonalRulesApp {
                 this.showView('active'); // Could filter by system in the future
             });
         });
+
+        // Export button
+        const exportBtn = document.querySelector('[data-action="export"]');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => this.exportData());
+        }
+
+        // Import button
+        const importBtn = document.querySelector('[data-action="import"]');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => this.importData());
+        }
     }
 
     /**
@@ -888,6 +906,72 @@ class PersonalRulesApp {
             day: 'numeric', 
             year: 'numeric' 
         });
+    }
+
+    /**
+     * Export all data as JSON file
+     */
+    async exportData() {
+        try {
+            const jsonData = await this.db.exportData();
+            const blob = new Blob([jsonData], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `personal-rules-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            this.showSuccess('Backup exported successfully!');
+        } catch (error) {
+            console.error('Failed to export data:', error);
+            this.showError('Failed to export backup. Please try again.');
+        }
+    }
+
+    /**
+     * Import data from JSON file
+     */
+    async importData() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const jsonData = event.target.result;
+                        
+                        // Confirm before importing
+                        if (!confirm('This will replace all current rules with the backup. Are you sure?')) {
+                            return;
+                        }
+
+                        const count = await this.db.importData(jsonData);
+                        await this.loadRules();
+                        
+                        this.showSuccess(`Successfully imported ${count} rules!`);
+                        this.renderView(this.currentView);
+                    } catch (error) {
+                        console.error('Failed to parse import file:', error);
+                        this.showError('Invalid backup file. Please check the file and try again.');
+                    }
+                };
+                reader.readAsText(file);
+            } catch (error) {
+                console.error('Failed to import data:', error);
+                this.showError('Failed to import backup. Please try again.');
+            }
+        };
+
+        input.click();
     }
 
     /**
