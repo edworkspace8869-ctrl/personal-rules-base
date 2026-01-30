@@ -3,7 +3,7 @@
  * Handles caching and offline functionality
  */
 
-const CACHE_NAME = 'personal-rules-v4';
+const CACHE_NAME = 'personal-rules-base-alpha-v1';
 const urlsToCache = [
   '/personal-rules-base/',
   '/personal-rules-base/index.html',
