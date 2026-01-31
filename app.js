@@ -96,6 +96,10 @@ class PersonalRulesApp {
                 container.innerHTML = this.renderActiveRules();
                 this.attachRuleListListeners();
                 break;
+            case 'passed':
+                container.innerHTML = this.renderPassedRules();
+                this.attachRuleListListeners();
+                break;
             case 'proposed':
                 container.innerHTML = this.renderProposedRules();
                 this.attachProposedListeners();
@@ -245,6 +249,40 @@ class PersonalRulesApp {
                 </div>
             `;
         }).join('');
+    }
+
+    /**
+     * Render passed rules view (passed but not yet active)
+     */
+    renderPassedRules() {
+        const passedRules = this.rules.filter(r => r.status === 'passed' && !r.isArchived);
+        
+        if (passedRules.length === 0) {
+            return `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📅</div>
+                    <p class="empty-state-text">No passed rules awaiting activation. Rules become active on their effective date.</p>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="section">
+                <div class="section-title">Awaiting Activation</div>
+                ${passedRules.map(rule => `
+                    <div class="rule-card" data-action="view-detail" data-id="${rule.id}">
+                        <div class="rule-header">
+                            <div class="rule-id">${rule.id}</div>
+                            <div class="rule-status status-${rule.status}">${this.formatStatus(rule.status)}</div>
+                        </div>
+                        <div class="rule-title">${rule.title}</div>
+                        <div class="rule-meta"><strong>System:</strong> ${rule.system}</div>
+                        <div class="rule-meta"><strong>Effective Date:</strong> ${this.formatDate(new Date(rule.effectiveDate))}</div>
+                        <div class="rule-meta"><strong>Will Expire:</strong> ${this.formatDate(new Date(rule.expirationDate))}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     }
 
     /**
@@ -497,6 +535,106 @@ class PersonalRulesApp {
     }
 
     /**
+     * Show amendment creation dialog
+     */
+    async showAmendmentDialog(baseRuleId) {
+        const baseRule = this.rules.find(r => r.id === baseRuleId);
+        if (!baseRule) return;
+
+        // Get existing amendments to determine next number
+        const amendments = await this.db.getAmendments(baseRuleId);
+        const nextAmendmentNum = amendments.length + 1;
+        const amendmentId = `${baseRuleId}A${nextAmendmentNum}`;
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h3>Create Amendment to ${baseRuleId}</h3>
+                <p style="color: #888; margin-bottom: 20px; font-size: 13px;">Amendment ID will be: ${amendmentId}</p>
+                
+                <form id="amendmentForm">
+                    <div class="form-group">
+                        <label class="form-label">What changed? *</label>
+                        <textarea class="form-textarea" id="amendmentChanges" placeholder="Describe what you're changing about this rule..." required></textarea>
+                        <div class="form-help">This will become the amendment's title</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Updated Purpose/Hypothesis Clause *</label>
+                        <textarea class="form-textarea" id="amendmentClauseText" required>${baseRule.clauseText}</textarea>
+                        <div class="form-help">Edit the clause to reflect the amendment</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Updated Body</label>
+                        <textarea class="form-textarea" id="amendmentBody">${baseRule.body || ''}</textarea>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-primary">Create Amendment</button>
+                        <button type="button" class="btn btn-secondary" id="cancelAmendment">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Handle form submission
+        document.getElementById('amendmentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const changes = document.getElementById('amendmentChanges').value.trim();
+            const clauseText = document.getElementById('amendmentClauseText').value.trim();
+            const body = document.getElementById('amendmentBody').value.trim();
+
+            if (!changes || !clauseText) {
+                alert('Please fill in required fields');
+                return;
+            }
+
+            // Create amendment rule
+            const amendment = {
+                id: amendmentId,
+                title: `Amendment ${nextAmendmentNum}: ${changes}`,
+                system: baseRule.system,
+                status: 'proposed', // Amendments start as proposed
+                passedDate: null,
+                effectiveDate: null,
+                effectiveDateType: null,
+                expirationDate: null,
+                clauseType: baseRule.clauseType,
+                clauseText: clauseText,
+                successMetrics: baseRule.successMetrics,
+                successMetricsSource: baseRule.successMetricsSource,
+                body: body,
+                isArchived: false,
+                baseRuleId: baseRuleId,
+                amendmentNumber: nextAmendmentNum,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            try {
+                await this.db.createRule(amendment);
+                await this.loadRules();
+                this.showSuccess(`Amendment ${amendmentId} created successfully!`);
+                document.body.removeChild(modal);
+                this.showView('proposed');
+            } catch (error) {
+                console.error('Failed to create amendment:', error);
+                this.showError('Failed to create amendment. Please try again.');
+            }
+        });
+
+        // Handle cancel
+        document.getElementById('cancelAmendment').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+    }
+
+    /**
      * Show pass dialog for setting effective date
      */
     async showPassDialog(ruleId) {
@@ -656,16 +794,12 @@ class PersonalRulesApp {
 
                 <div class="form-group">
                     <label class="form-label">System *</label>
-                    ${allSystems.length > 0 ? `
-                        <select class="form-select" id="systemSelect">
-                            <option value="">-- Select Existing or Type New --</option>
-                            ${allSystems.map(sys => `<option value="${sys}" ${formData.system === sys ? 'selected' : ''}>${sys}</option>`).join('')}
-                            <option value="__new__">+ Create New System</option>
-                        </select>
-                        <input type="text" class="form-input" id="systemInput" placeholder="Enter new system name" style="display: none; margin-top: 8px;">
-                    ` : `
-                        <input type="text" class="form-input" id="systemInput" value="${formData.system}" placeholder="e.g., Sunday Routine" required>
-                    `}
+                    <select class="form-select" id="systemSelect">
+                        <option value="">-- Select Existing or Create New --</option>
+                        ${allSystems.map(sys => `<option value="${sys}" ${formData.system === sys ? 'selected' : ''}>${sys}</option>`).join('')}
+                        <option value="__new__">+ Create New System</option>
+                    </select>
+                    <input type="text" class="form-input" id="systemInput" placeholder="Enter new system name" style="display: none; margin-top: 8px;">
                     <div class="form-help">Category or routine this rule belongs to</div>
                 </div>
 
@@ -732,30 +866,28 @@ class PersonalRulesApp {
      */
     attachCreateFormListeners() {
         const form = document.getElementById('ruleForm');
-        
-        // System selector logic
         const systemSelect = document.getElementById('systemSelect');
         const systemInput = document.getElementById('systemInput');
-        if (systemSelect) {
-            systemSelect.addEventListener('change', async (e) => {
-                if (e.target.value === '__new__') {
-                    systemInput.style.display = 'block';
-                    systemInput.required = true;
-                    systemSelect.required = false;
-                    systemInput.focus();
-                } else {
-                    systemInput.style.display = 'none';
-                    systemInput.required = false;
-                    systemSelect.required = true;
-                    // Update success metrics preview
-                    await this.updateSystemMetricsPreview(e.target.value);
-                }
-            });
-
-            // Initial preview if system is selected
-            if (systemSelect.value && systemSelect.value !== '__new__') {
-                this.updateSystemMetricsPreview(systemSelect.value);
+        
+        // System selector logic
+        systemSelect.addEventListener('change', async (e) => {
+            if (e.target.value === '__new__') {
+                systemInput.style.display = 'block';
+                systemInput.required = true;
+                systemSelect.required = false;
+                systemInput.focus();
+            } else {
+                systemInput.style.display = 'none';
+                systemInput.required = false;
+                systemSelect.required = true;
+                // Update success metrics preview
+                await this.updateSystemMetricsPreview(e.target.value);
             }
+        });
+
+        // Initial preview if system is selected
+        if (systemSelect.value && systemSelect.value !== '__new__' && systemSelect.value !== '') {
+            this.updateSystemMetricsPreview(systemSelect.value);
         }
 
         // Success metrics type change
@@ -772,7 +904,7 @@ class PersonalRulesApp {
                     customGroup.style.display = 'none';
                     systemPreview.style.display = 'block';
                     // Update preview
-                    const selectedSystem = systemSelect ? systemSelect.value : systemInput.value;
+                    const selectedSystem = systemSelect.value !== '__new__' ? systemSelect.value : systemInput.value;
                     await this.updateSystemMetricsPreview(selectedSystem);
                 } else {
                     customGroup.style.display = 'none';
@@ -824,10 +956,17 @@ class PersonalRulesApp {
             const systemInput = document.getElementById('systemInput');
             
             let system;
-            if (systemSelect && systemSelect.value && systemSelect.value !== '__new__') {
+            if (systemSelect.value === '__new__') {
+                system = systemInput.value.trim();
+                if (!system) {
+                    this.showError('Please enter a system name.');
+                    return;
+                }
+            } else if (systemSelect.value) {
                 system = systemSelect.value;
             } else {
-                system = systemInput.value.trim();
+                this.showError('Please select or create a system.');
+                return;
             }
 
             const clauseType = document.querySelector('input[name="clauseType"]:checked').value;
@@ -861,6 +1000,17 @@ class PersonalRulesApp {
                     this.showError(`The system "${system}" has no success metrics defined. Please add metrics to the system or choose custom metrics.`);
                     return;
                 }
+            }
+
+            // Create system if it doesn't exist
+            const existingSystem = await this.db.getSystem(system);
+            if (!existingSystem) {
+                await this.db.createSystem({
+                    name: system,
+                    successMetrics: null,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                });
             }
 
             // Generate rule ID
@@ -1087,6 +1237,13 @@ class PersonalRulesApp {
         if (backBtn) {
             backBtn.addEventListener('click', () => {
                 this.renderView(this.currentView);
+            });
+        }
+
+        const amendmentBtn = container.querySelector('[data-action="create-amendment"]');
+        if (amendmentBtn) {
+            amendmentBtn.addEventListener('click', () => {
+                this.showAmendmentDialog(ruleId);
             });
         }
 
