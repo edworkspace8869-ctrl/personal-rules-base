@@ -6,7 +6,7 @@
 class RulesDatabase {
     constructor() {
         this.dbName = 'PersonalRulesDB';
-        this.version = 2; // Increment version for schema change
+        this.version = 3; // Increment version for systemId addition
         this.db = null;
     }
 
@@ -56,6 +56,7 @@ class RulesDatabase {
                     
                     // Create indexes
                     systemsStore.createIndex('createdAt', 'createdAt', { unique: false });
+                    systemsStore.createIndex('systemId', 'systemId', { unique: true });
                     
                     console.log('Systems object store created with indexes');
                 }
@@ -440,6 +441,19 @@ class RulesDatabase {
     // ============================================
     // SYSTEMS MANAGEMENT
     // ============================================
+
+    /**
+     * Get the next available system ID number
+     * @returns {Promise<number>} Next system ID number
+     */
+    async getNextSystemId() {
+        const allSystems = await this.getAllSystems();
+        if (allSystems.length === 0) return 1;
+        const ids = allSystems
+            .map(s => parseInt(s.systemId, 10))
+            .filter(n => !isNaN(n));
+        return ids.length === 0 ? 1 : Math.max(...ids) + 1;
+    }
 
     /**
      * Create a new system

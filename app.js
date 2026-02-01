@@ -278,7 +278,7 @@ class PersonalRulesApp {
                         <div class="rule-title">${rule.title}</div>
                         <div class="rule-meta"><strong>System:</strong> ${rule.system}</div>
                         <div class="rule-meta"><strong>Effective Date:</strong> ${this.formatDate(new Date(rule.effectiveDate))}</div>
-                        <div class="rule-meta"><strong>Will Expire:</strong> ${this.formatDate(new Date(rule.expirationDate))}</div>
+                        <div class="rule-meta"><strong>Will Expire:</strong> ${rule.expirationDate ? this.formatDate(new Date(rule.expirationDate)) : 'Indefinite'}</div>
                     </div>
                 `).join('')}
             </div>
@@ -314,6 +314,7 @@ class PersonalRulesApp {
                         <div class="rule-meta"><strong>Type:</strong> ${rule.clauseType === 'purpose' ? 'Purpose' : 'Hypothesis'}</div>
                         <div class="action-buttons">
                             <button class="btn btn-success btn-small" data-action="pass" data-id="${rule.id}">Pass</button>
+                            <button class="btn btn-primary btn-small" data-action="edit-proposed" data-id="${rule.id}">Edit</button>
                             <button class="btn btn-secondary btn-small" data-action="view-detail" data-id="${rule.id}">View</button>
                             <button class="btn btn-danger btn-small" data-action="reject" data-id="${rule.id}">Reject</button>
                         </div>
@@ -321,37 +322,6 @@ class PersonalRulesApp {
                 `).join('')}
             </div>
         `;
-    }
-
-    /**
-     * Attach proposed rules listeners
-     */
-    attachProposedListeners() {
-        // Pass buttons
-        document.querySelectorAll('[data-action="pass"]').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const ruleId = e.target.dataset.id;
-                await this.showPassDialog(ruleId);
-            });
-        });
-
-        // Reject buttons
-        document.querySelectorAll('[data-action="reject"]').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const ruleId = e.target.dataset.id;
-                if (confirm('Are you sure you want to reject this rule?')) {
-                    await this.rejectRule(ruleId);
-                }
-            });
-        });
-
-        // View detail buttons
-        document.querySelectorAll('[data-action="view-detail"]').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const ruleId = e.target.dataset.id;
-                this.showRuleDetail(ruleId);
-            });
-        });
     }
 
     /**
@@ -370,6 +340,9 @@ class PersonalRulesApp {
                         const systemRules = this.rules.filter(r => r.system === system.name && !r.isArchived);
                         return `
                             <div class="rule-card" data-action="edit-system" data-system="${system.name}">
+                                <div class="rule-header">
+                                    <div class="rule-id">System ${system.systemId || '?'}</div>
+                                </div>
                                 <div class="rule-title">${system.name}</div>
                                 <div class="rule-meta"><strong>Rules:</strong> ${systemRules.length}</div>
                                 ${system.successMetrics ? `
@@ -408,6 +381,7 @@ class PersonalRulesApp {
     async showSystemDialog(systemName = null) {
         const isEdit = !!systemName;
         const system = isEdit ? await this.db.getSystem(systemName) : null;
+        const nextId = isEdit ? null : await this.db.getNextSystemId();
 
         const modal = document.createElement('div');
         modal.className = 'modal';
@@ -415,6 +389,12 @@ class PersonalRulesApp {
             <div class="modal-content">
                 <h3>${isEdit ? 'Edit' : 'Create'} System</h3>
                 <form id="systemForm">
+                    <div class="form-group">
+                        <label class="form-label">System ID</label>
+                        <input type="text" class="form-input" id="systemIdDisplay" value="${isEdit ? 'System ' + (system?.systemId || '?') : 'System ' + nextId}" readonly style="color: #666; cursor: default;">
+                        <div class="form-help">Assigned automatically</div>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label">System Name *</label>
                         <input type="text" class="form-input" id="systemName" value="${system?.name || ''}" placeholder="e.g., Sunday Routine" ${isEdit ? 'readonly' : ''} required>
@@ -451,6 +431,7 @@ class PersonalRulesApp {
 
             const systemData = {
                 name,
+                systemId: isEdit ? (system?.systemId || nextId) : nextId,
                 successMetrics: successMetrics || null,
                 createdAt: system?.createdAt || new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -512,6 +493,14 @@ class PersonalRulesApp {
             btn.addEventListener('click', async (e) => {
                 const ruleId = e.target.dataset.id;
                 await this.showPassDialog(ruleId);
+            });
+        });
+
+        // Edit buttons
+        document.querySelectorAll('[data-action="edit-proposed"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const ruleId = e.target.dataset.id;
+                this.showEditProposedForm(ruleId);
             });
         });
 
@@ -719,15 +708,26 @@ class PersonalRulesApp {
             }
 
             const passedDate = new Date();
-            const expirationDate = new Date(effectiveDate);
-            expirationDate.setDate(expirationDate.getDate() + 30);
+
+            // Compute expiration based on sunset clause
+            let expirationDate = null;
+            if (rule.sunsetType === 'indefinite') {
+                expirationDate = null; // no expiration
+            } else if (rule.sunsetType === 'custom' && rule.customSunsetDays) {
+                expirationDate = new Date(effectiveDate);
+                expirationDate.setDate(expirationDate.getDate() + rule.customSunsetDays);
+            } else {
+                // default: 30 days
+                expirationDate = new Date(effectiveDate);
+                expirationDate.setDate(expirationDate.getDate() + 30);
+            }
 
             // Update rule
             rule.status = effectiveDate <= new Date() ? 'active' : 'passed';
             rule.passedDate = passedDate.toISOString();
             rule.effectiveDate = effectiveDate.toISOString();
             rule.effectiveDateType = effectiveDateType === 'same' ? 'sameAsPassedDate' : 'custom';
-            rule.expirationDate = expirationDate.toISOString();
+            rule.expirationDate = expirationDate ? expirationDate.toISOString() : null;
             rule.updatedAt = new Date().toISOString();
 
             await this.db.updateRule(rule);
@@ -855,6 +855,30 @@ class PersonalRulesApp {
                     <textarea class="form-textarea" id="body" placeholder="Additional details or context...">${formData.body}</textarea>
                 </div>
 
+                <div class="form-group">
+                    <label class="form-label">Sunset Clause</label>
+                    <div class="form-radio">
+                        <label>
+                            <input type="radio" name="sunsetType" value="default" ${(!formData.sunsetType || formData.sunsetType === 'default') ? 'checked' : ''}>
+                            Default (30 Days)
+                        </label>
+                        <label>
+                            <input type="radio" name="sunsetType" value="indefinite" ${formData.sunsetType === 'indefinite' ? 'checked' : ''}>
+                            Indefinite
+                        </label>
+                        <label>
+                            <input type="radio" name="sunsetType" value="custom" ${formData.sunsetType === 'custom' ? 'checked' : ''}>
+                            Custom
+                        </label>
+                    </div>
+                    <div class="form-help">How long the rule stays active after its effective date</div>
+                </div>
+
+                <div class="form-group" id="customSunsetGroup" style="${formData.sunsetType === 'custom' ? '' : 'display: none;'}">
+                    <label class="form-label">Custom Duration (Days)</label>
+                    <input type="number" class="form-input" id="customSunsetDays" min="1" max="365" value="${formData.sunsetType === 'custom' && formData.customSunsetDays ? formData.customSunsetDays : 30}" placeholder="e.g. 60">
+                </div>
+
                 <button type="submit" class="btn btn-primary">${isEdit ? 'Update' : 'Create'} Rule</button>
                 ${isEdit ? '<button type="button" class="btn btn-secondary" id="cancelEdit">Cancel</button>' : ''}
             </form>
@@ -912,6 +936,23 @@ class PersonalRulesApp {
                 }
             });
         });
+
+        // Sunset clause type toggle
+        const sunsetRadios = form.querySelectorAll('input[name="sunsetType"]');
+        sunsetRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const customSunsetGroup = document.getElementById('customSunsetGroup');
+                customSunsetGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+            });
+        });
+
+        // Cancel edit button (when editing a proposed rule)
+        const cancelEditBtn = document.getElementById('cancelEdit');
+        if (cancelEditBtn) {
+            cancelEditBtn.addEventListener('click', () => {
+                this.renderView(this.currentView);
+            });
+        }
 
         // Form submission
         form.addEventListener('submit', async (e) => {
@@ -973,10 +1014,19 @@ class PersonalRulesApp {
             const clauseText = document.getElementById('clauseText').value.trim();
             const successMetricsType = document.querySelector('input[name="successMetricsType"]:checked').value;
             const body = document.getElementById('body').value.trim();
+            const sunsetType = document.querySelector('input[name="sunsetType"]:checked').value;
+            const customSunsetDays = sunsetType === 'custom'
+                ? parseInt(document.getElementById('customSunsetDays').value, 10)
+                : null;
 
             // Validation
             if (!title || !system || !clauseText) {
                 this.showError('Please fill in all required fields.');
+                return;
+            }
+
+            if (sunsetType === 'custom' && (!customSunsetDays || customSunsetDays < 1)) {
+                this.showError('Please enter a valid number of days (minimum 1).');
                 return;
             }
 
@@ -1005,8 +1055,10 @@ class PersonalRulesApp {
             // Create system if it doesn't exist
             const existingSystem = await this.db.getSystem(system);
             if (!existingSystem) {
+                const nextId = await this.db.getNextSystemId();
                 await this.db.createSystem({
                     name: system,
+                    systemId: nextId,
                     successMetrics: null,
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString()
@@ -1035,6 +1087,8 @@ class PersonalRulesApp {
                 clauseText,
                 successMetrics,
                 successMetricsSource, // 'none', 'system', or 'custom'
+                sunsetType,           // 'default', 'indefinite', or 'custom'
+                customSunsetDays,     // number | null
                 body,
                 isArchived: false,
                 baseRuleId: null,
@@ -1201,10 +1255,19 @@ class PersonalRulesApp {
                         <div style="font-size: 13px; color: #888; margin-bottom: 4px;">Created: ${this.formatDate(new Date(rule.createdAt))}</div>
                         ${rule.passedDate ? `<div style="font-size: 13px; color: #888; margin-bottom: 4px;">Passed: ${this.formatDate(new Date(rule.passedDate))}</div>` : ''}
                         ${rule.effectiveDate ? `<div style="font-size: 13px; color: #888; margin-bottom: 4px;">Effective: ${this.formatDate(new Date(rule.effectiveDate))}</div>` : ''}
-                        ${rule.expirationDate ? `<div style="font-size: 13px; color: #888;">Expires: ${this.formatDate(new Date(rule.expirationDate))}</div>` : ''}
+                        <div style="font-size: 13px; color: #888;">Expires: ${rule.expirationDate ? this.formatDate(new Date(rule.expirationDate)) : 'Indefinite'}</div>
                     </div>
                 </div>
             ` : ''}
+
+            <div class="detail-section">
+                <div class="detail-label">Sunset Clause</div>
+                <div class="detail-value" style="font-size: 14px;">
+                    ${rule.sunsetType === 'indefinite' ? 'Indefinite — this rule does not expire automatically.'
+                      : rule.sunsetType === 'custom' && rule.customSunsetDays ? `Custom — ${rule.customSunsetDays} days after effective date.`
+                      : 'Default — 30 days after effective date.'}
+                </div>
+            </div>
 
             <div class="detail-section">
                 <div class="detail-label">${rule.clauseType === 'purpose' ? 'Purpose Clause' : 'Hypothesis Clause'}</div>
@@ -1227,6 +1290,7 @@ class PersonalRulesApp {
 
             <div class="action-buttons">
                 <button class="btn btn-secondary btn-small" data-action="back">Back</button>
+                ${rule.status === 'proposed' ? `<button class="btn btn-primary btn-small" data-action="edit-proposed">Edit</button>` : ''}
                 ${rule.status === 'active' ? `<button class="btn btn-secondary btn-small" data-action="create-amendment">Create Amendment</button>` : ''}
                 ${rule.status === 'rejected' || rule.status === 'expired' ? `<button class="btn btn-secondary btn-small" data-action="archive">Archive</button>` : ''}
             </div>
@@ -1237,6 +1301,13 @@ class PersonalRulesApp {
         if (backBtn) {
             backBtn.addEventListener('click', () => {
                 this.renderView(this.currentView);
+            });
+        }
+
+        const editProposedBtn = container.querySelector('[data-action="edit-proposed"]');
+        if (editProposedBtn) {
+            editProposedBtn.addEventListener('click', () => {
+                this.showEditProposedForm(ruleId);
             });
         }
 
@@ -1252,6 +1323,192 @@ class PersonalRulesApp {
             archiveBtn.addEventListener('click', async () => {
                 await this.archiveRule(ruleId);
             });
+        }
+    }
+
+    /**
+     * Show edit form for a proposed rule
+     */
+    showEditProposedForm(ruleId) {
+        const rule = this.rules.find(r => r.id === ruleId);
+        if (!rule) return;
+
+        // Render the create form pre-filled with this rule's data, in edit mode
+        const container = document.getElementById('app-container');
+        container.innerHTML = this.renderCreateForm(rule);
+        this.attachEditProposedListeners(rule);
+    }
+
+    /**
+     * Attach listeners for the edit-proposed form
+     */
+    attachEditProposedListeners(rule) {
+        const form = document.getElementById('ruleForm');
+        const systemSelect = document.getElementById('systemSelect');
+        const systemInput = document.getElementById('systemInput');
+
+        // System selector logic (same as create)
+        systemSelect.addEventListener('change', async (e) => {
+            if (e.target.value === '__new__') {
+                systemInput.style.display = 'block';
+                systemInput.required = true;
+                systemSelect.required = false;
+                systemInput.focus();
+            } else {
+                systemInput.style.display = 'none';
+                systemInput.required = false;
+                systemSelect.required = true;
+                await this.updateSystemMetricsPreview(e.target.value);
+            }
+        });
+
+        // Success metrics type toggle
+        const metricsTypeRadios = form.querySelectorAll('input[name="successMetricsType"]');
+        metricsTypeRadios.forEach(radio => {
+            radio.addEventListener('change', async (e) => {
+                const customGroup = document.getElementById('customMetricsGroup');
+                const systemPreview = document.getElementById('systemMetricsPreview');
+                if (e.target.value === 'custom') {
+                    customGroup.style.display = 'block';
+                    systemPreview.style.display = 'none';
+                } else if (e.target.value === 'system') {
+                    customGroup.style.display = 'none';
+                    systemPreview.style.display = 'block';
+                    const selectedSystem = systemSelect.value !== '__new__' ? systemSelect.value : systemInput.value;
+                    await this.updateSystemMetricsPreview(selectedSystem);
+                } else {
+                    customGroup.style.display = 'none';
+                    systemPreview.style.display = 'none';
+                }
+            });
+        });
+
+        // Sunset clause type toggle
+        const sunsetRadios = form.querySelectorAll('input[name="sunsetType"]');
+        sunsetRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const customSunsetGroup = document.getElementById('customSunsetGroup');
+                customSunsetGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+            });
+        });
+
+        // Cancel button
+        const cancelEditBtn = document.getElementById('cancelEdit');
+        if (cancelEditBtn) {
+            cancelEditBtn.addEventListener('click', () => {
+                this.showRuleDetail(rule.id);
+            });
+        }
+
+        // Form submission — update the existing proposed rule in place
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.updateProposedRule(rule.id);
+        });
+    }
+
+    /**
+     * Update an existing proposed rule in place
+     */
+    async updateProposedRule(ruleId) {
+        try {
+            const rule = this.rules.find(r => r.id === ruleId);
+            if (!rule || rule.status !== 'proposed') {
+                this.showError('Only proposed rules can be edited.');
+                return;
+            }
+
+            const title = document.getElementById('title').value.trim();
+            const systemSelect = document.getElementById('systemSelect');
+            const systemInput = document.getElementById('systemInput');
+
+            let system;
+            if (systemSelect.value === '__new__') {
+                system = systemInput.value.trim();
+                if (!system) {
+                    this.showError('Please enter a system name.');
+                    return;
+                }
+            } else if (systemSelect.value) {
+                system = systemSelect.value;
+            } else {
+                this.showError('Please select or create a system.');
+                return;
+            }
+
+            const clauseType = document.querySelector('input[name="clauseType"]:checked').value;
+            const clauseText = document.getElementById('clauseText').value.trim();
+            const successMetricsType = document.querySelector('input[name="successMetricsType"]:checked').value;
+            const body = document.getElementById('body').value.trim();
+            const sunsetType = document.querySelector('input[name="sunsetType"]:checked').value;
+            const customSunsetDays = sunsetType === 'custom'
+                ? parseInt(document.getElementById('customSunsetDays').value, 10)
+                : null;
+
+            if (!title || !system || !clauseText) {
+                this.showError('Please fill in all required fields.');
+                return;
+            }
+
+            if (sunsetType === 'custom' && (!customSunsetDays || customSunsetDays < 1)) {
+                this.showError('Please enter a valid number of days (minimum 1).');
+                return;
+            }
+
+            // Resolve success metrics
+            let successMetrics = null;
+            let successMetricsSource = 'none';
+            if (successMetricsType === 'custom') {
+                successMetrics = document.getElementById('successMetrics').value.trim();
+                if (!successMetrics) {
+                    this.showError('Please enter custom success metrics or select a different option.');
+                    return;
+                }
+                successMetricsSource = 'custom';
+            } else if (successMetricsType === 'system') {
+                const systemData = await this.db.getSystem(system);
+                if (systemData && systemData.successMetrics) {
+                    successMetrics = systemData.successMetrics;
+                    successMetricsSource = 'system';
+                } else {
+                    this.showError(`The system "${system}" has no success metrics defined. Please add metrics to the system or choose custom metrics.`);
+                    return;
+                }
+            }
+
+            // Create system if it doesn't exist
+            const existingSystem = await this.db.getSystem(system);
+            if (!existingSystem) {
+                const nextId = await this.db.getNextSystemId();
+                await this.db.createSystem({
+                    name: system,
+                    systemId: nextId,
+                    successMetrics: null,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                });
+            }
+
+            // Apply updates to the rule (keep id, status, timestamps intact)
+            rule.title = title;
+            rule.system = system;
+            rule.clauseType = clauseType;
+            rule.clauseText = clauseText;
+            rule.successMetrics = successMetrics;
+            rule.successMetricsSource = successMetricsSource;
+            rule.sunsetType = sunsetType;
+            rule.customSunsetDays = customSunsetDays;
+            rule.body = body;
+            rule.updatedAt = new Date().toISOString();
+
+            await this.db.updateRule(rule);
+            await this.loadRules();
+
+            this.showSuccess(`Rule "${title}" updated successfully!`);
+            this.showView('proposed');
+        } catch (error) {
+            console.error('Failed to update proposed rule:', error);
+            this.showError('Failed to update rule. Please try again.');
         }
     }
 
@@ -1293,7 +1550,7 @@ class PersonalRulesApp {
                     <div class="rule-status status-${rule.status}">${this.formatStatus(rule.status)}</div>
                 </div>
                 <div class="rule-title">${rule.title}</div>
-                <div class="rule-meta"><strong>Expires:</strong> ${this.formatDate(new Date(rule.expirationDate))}</div>
+                <div class="rule-meta"><strong>Expires:</strong> ${rule.expirationDate ? this.formatDate(new Date(rule.expirationDate)) : 'Indefinite'}</div>
             </div>
         `;
     }
@@ -1336,6 +1593,8 @@ class PersonalRulesApp {
             // Expire active rules whose expiration date has passed
             const activeRules = this.rules.filter(r => r.status === 'active');
             for (const rule of activeRules) {
+                if (!rule.expirationDate) continue; // indefinite rules never expire
+
                 const expirationDate = new Date(rule.expirationDate);
                 expirationDate.setHours(0, 0, 0, 0);
                 
