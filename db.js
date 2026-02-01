@@ -307,20 +307,23 @@ class RulesDatabase {
 
     /**
      * Export all data as JSON
-     * Useful for backups
-     * @returns {Promise<string>} JSON string of all rules
+     * Includes both rules and systems for a complete backup
+     * @returns {Promise<string>} JSON string of all data
      */
     async exportData() {
         const allRules = await this.getAllRules();
+        const allSystems = await this.getAllSystems();
         return JSON.stringify({
             version: this.version,
             exportDate: new Date().toISOString(),
-            rules: allRules
+            rules: allRules,
+            systems: allSystems
         }, null, 2);
     }
 
     /**
      * Import data from JSON
+     * Restores both rules and systems
      * WARNING: This will overwrite existing data
      * @param {string} jsonData - JSON string to import
      * @returns {Promise<number>} Number of rules imported
@@ -335,26 +338,49 @@ class RulesDatabase {
 
             // Clear existing data
             await this.clearAllRules();
+            await this.clearAllSystems();
 
-            // Import all rules
-            const transaction = this.db.transaction(['rules'], 'readwrite');
-            const store = transaction.objectStore('rules');
+            // Import rules
+            const rulesTransaction = this.db.transaction(['rules'], 'readwrite');
+            const rulesStore = rulesTransaction.objectStore('rules');
 
             for (const rule of data.rules) {
-                store.add(rule);
+                rulesStore.add(rule);
             }
 
-            return new Promise((resolve, reject) => {
-                transaction.oncomplete = () => {
+            await new Promise((resolve, reject) => {
+                rulesTransaction.oncomplete = () => {
                     console.log(`Imported ${data.rules.length} rules`);
-                    resolve(data.rules.length);
+                    resolve();
                 };
-
-                transaction.onerror = () => {
-                    console.error('Import failed:', transaction.error);
-                    reject(transaction.error);
+                rulesTransaction.onerror = () => {
+                    console.error('Rules import failed:', rulesTransaction.error);
+                    reject(rulesTransaction.error);
                 };
             });
+
+            // Import systems (gracefully handle legacy backups that lack the key)
+            if (data.systems && Array.isArray(data.systems)) {
+                const systemsTransaction = this.db.transaction(['systems'], 'readwrite');
+                const systemsStore = systemsTransaction.objectStore('systems');
+
+                for (const system of data.systems) {
+                    systemsStore.add(system);
+                }
+
+                await new Promise((resolve, reject) => {
+                    systemsTransaction.oncomplete = () => {
+                        console.log(`Imported ${data.systems.length} systems`);
+                        resolve();
+                    };
+                    systemsTransaction.onerror = () => {
+                        console.error('Systems import failed:', systemsTransaction.error);
+                        reject(systemsTransaction.error);
+                    };
+                });
+            }
+
+            return data.rules.length;
         } catch (error) {
             console.error('Failed to import data:', error);
             throw error;
@@ -379,6 +405,29 @@ class RulesDatabase {
 
             request.onerror = () => {
                 console.error('Failed to clear rules:', request.error);
+                reject(request.error);
+            };
+        });
+    }
+
+    /**
+     * Clear all systems from the database
+     * USE WITH CAUTION
+     * @returns {Promise<boolean>} True if cleared successfully
+     */
+    async clearAllSystems() {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['systems'], 'readwrite');
+            const store = transaction.objectStore('systems');
+            const request = store.clear();
+
+            request.onsuccess = () => {
+                console.log('All systems cleared');
+                resolve(true);
+            };
+
+            request.onerror = () => {
+                console.error('Failed to clear systems:', request.error);
                 reject(request.error);
             };
         });
