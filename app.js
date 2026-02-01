@@ -116,6 +116,12 @@ class PersonalRulesApp {
                 container.innerHTML = this.renderArchives();
                 this.attachArchiveListeners();
                 break;
+            case 'devtools':
+                this.renderDevTools().then(html => {
+                    container.innerHTML = html;
+                    this.attachDevToolsListeners();
+                });
+                break;
             default:
                 container.innerHTML = '<div class="empty-state"><p>View not found</p></div>';
         }
@@ -1224,6 +1230,96 @@ class PersonalRulesApp {
         } catch (error) {
             console.error('Failed to delete rule:', error);
             this.showError('Failed to delete rule. Please try again.');
+        }
+    }
+
+    /**
+     * Render Dev Tools view
+     */
+    async renderDevTools() {
+        const orphaned = this.systems.filter(s => !s.systemId);
+        const nextId = await this.db.getNextSystemId();
+
+        // Build a preview of what IDs will be assigned
+        let previewRows = '';
+        orphaned.forEach((sys, i) => {
+            previewRows += `
+                <div class="rule-card" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; margin-bottom: 8px;">
+                    <div>
+                        <div class="rule-title" style="margin-bottom: 2px;">${sys.name}</div>
+                        <div class="rule-meta">Currently: <span style="color: #ef4444;">System ?</span></div>
+                    </div>
+                    <div class="rule-meta" style="color: #6ee7b7; font-weight: 600;">→ System ${nextId + i}</div>
+                </div>
+            `;
+        });
+
+        return `
+            <div class="section">
+                <div class="section-title">Dev Tools</div>
+                <div class="rule-card" style="border-color: #333; margin-bottom: 24px;">
+                    <div class="rule-title" style="color: #fcd34d; margin-bottom: 6px;">⚠ Patch: Orphaned System IDs</div>
+                    <div class="rule-meta" style="margin-bottom: 0;">
+                        Systems created before the System ID feature was added have no ID assigned.
+                        This tool assigns the next available IDs to each one.
+                    </div>
+                </div>
+            </div>
+
+            ${orphaned.length > 0 ? `
+                <div class="section">
+                    <div class="section-title">Systems Missing an ID (${orphaned.length})</div>
+                    ${previewRows}
+                    <button class="btn btn-primary" data-action="patch-system-ids">Assign IDs Now</button>
+                </div>
+            ` : `
+                <div class="empty-state">
+                    <div class="empty-state-icon">✓</div>
+                    <p class="empty-state-text">All systems have IDs assigned. No patch needed.</p>
+                </div>
+            `}
+        `;
+    }
+
+    /**
+     * Attach Dev Tools listeners
+     */
+    attachDevToolsListeners() {
+        const patchBtn = document.querySelector('[data-action="patch-system-ids"]');
+        if (patchBtn) {
+            patchBtn.addEventListener('click', async () => {
+                await this.patchOrphanedSystemIds();
+            });
+        }
+    }
+
+    /**
+     * Assign sequential IDs to any systems that are missing one
+     */
+    async patchOrphanedSystemIds() {
+        try {
+            const orphaned = this.systems.filter(s => !s.systemId);
+            if (orphaned.length === 0) {
+                this.showSuccess('Nothing to patch — all systems already have IDs.');
+                return;
+            }
+
+            let nextId = await this.db.getNextSystemId();
+
+            for (const sys of orphaned) {
+                sys.systemId = nextId;
+                sys.updatedAt = new Date().toISOString();
+                await this.db.updateSystem(sys);
+                nextId++;
+            }
+
+            await this.loadRules();
+            this.showSuccess(`Patched ${orphaned.length} system${orphaned.length === 1 ? '' : 's'} with new IDs.`);
+            // Re-render the view so the empty state shows up immediately
+            this.renderView('devtools');
+        } catch (error) {
+            console.error('Failed to patch system IDs:', error);
+            this.showError('Patch failed. Please try again.');
         }
     }
 
